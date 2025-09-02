@@ -1,4 +1,15 @@
-# Civit Image grabber
+# Civit Image grabber MODIFIED VERSION
+
+Every block of code added/modded is in bewtween:
+```
+#MOD
+#/MOD
+```
+So moded blocks of code can be easly found in the source.
+
+## What Is moddified?
+- The folder name while downloading by model ID is now the model name from pulled from civitai
+- With `--no_sort` option  the program creates separate folder for `.txt` files, keeping them all in ther, while images stay in main directory (named after model name).
 
 It downloads all the images from a provided Username, Model ID or Model TAG from CivitAI. 
 Should the API not spit out all the data for all images then I'm sorry. 

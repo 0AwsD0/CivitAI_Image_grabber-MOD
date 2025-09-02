@@ -526,7 +526,11 @@ class CivitaiDownloader:
              meta_filename_suffix = "_meta.txt"
              content_lines = [f"{k}: {str(v) if v is not None else ''}" for k, v in meta.items()]
 
-        directory = os.path.dirname(base_output_path_no_ext)
+        #MOD
+        parent_directory = os.path.dirname(base_output_path_no_ext)  #get parent folder
+        directory = os.path.join(parent_directory, "txt")            #append 'txt' subfolder
+        #/MOD
+
         base_filename = os.path.basename(base_output_path_no_ext)
         meta_filename = base_filename + meta_filename_suffix
         try:
@@ -1015,7 +1019,16 @@ class CivitaiDownloader:
                      if not valid: self.run_results[result_key].update({'status':'Failed (Validation)', 'reason': reason}); continue
                      target_dir, url = "", ""; url_params = f"&nsfw=X&sort=Newest" if idt == 'username' else "&nsfw=X"
                      if idt == 'username': target_dir = os.path.join(option_folder, self._clean_path_component(ident)); url = f"{self.base_url}?username={ident}{url_params}"
-                     elif idt == 'model': target_dir = os.path.join(option_folder, f"model_{ident}"); url = f"{self.base_url}?modelId={ident}{url_params}"
+
+                     #MOD
+                     elif idt == 'model':
+                        #resolve model name for folder name
+                        model_name = await self._get_model_name_by_id(ident)
+                        dir_component = self._clean_path_component(model_name, max_length=60) if model_name else f"model_{ident}"
+                        target_dir = os.path.join(option_folder, dir_component)
+                        url = f"{self.base_url}?modelId={ident}{url_params}"
+                    #/MOD
+                    
                      elif idt == 'modelVersion': target_dir = os.path.join(option_folder, f"modelVersion_{ident}"); url = f"{self.base_url}?modelVersionId={ident}{url_params}"
                      if target_dir and url: os.makedirs(target_dir, exist_ok=True); tasks.append(self._run_paginated_download(url, target_dir, parent_result_key=result_key))
                      else: self.run_results[result_key].update({'status':'Failed', 'reason':'Internal setup error'})
@@ -1212,6 +1225,23 @@ class CivitaiDownloader:
             self.logger.error("Model Version ID (--model_version_id) required for Mode 4 in non-interactive mode.");
             print("Error: Model Version ID required for Mode 4.");
             sys.exit(1)
+
+    #MOD
+    async def _get_model_name_by_id(self, model_id: str) -> Optional[str]:
+        """Fetch model name from Civitai API, given a model ID."""
+        try:
+            client = await self._get_client()
+            resp = await client.get(f"{MODELS_API_URL}/{model_id}")
+            if resp.status_code == 200:
+                data = resp.json()
+                name = data.get("name")
+                if name:
+                    return name
+            self.logger.warning(f"Could not resolve model name for ID {model_id}; using fallback.")
+        except Exception as e:
+            self.logger.error(f"Error fetching model name for ID {model_id}: {e}", exc_info=True)
+        return None
+    #/MOD
 
     # --- Utility and Reporting Methods ---
     def _create_option_folder(self, option_name: str) -> str:

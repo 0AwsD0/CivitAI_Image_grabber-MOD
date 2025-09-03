@@ -685,6 +685,35 @@ class CivitaiDownloader:
         while url:
              page_count += 1
              self.logger.info(f"Requesting API page {page_count} for {os.path.basename(target_dir)}")
+             #MOD
+             self.logger.info(f"URL: {url}")
+             '''   /\ ABOVE LINE WAS FOR DEBUG:
+                   || For some tests -> program got the models but images failed to be fetched ~failed on page 1 /after 5 minutes API started acting correctly
+
+                   More on that here (from logs):
+                    2025-09-03 05:32:24,311 - INFO - Starting Civitai Downloader run (Version 1.3-sqlite)...
+                    2025-09-03 05:32:24,919 - INFO - Calling helper _model_download_all_versions for model 87577 -> MY_PATH\image_downloads\Model_ID_Search\Asura Style
+                    2025-09-03 05:32:44,860 - INFO - Helper finished for model 87577
+                    2025-09-03 05:32:44,861 - INFO - Executing 1 download tasks (Modes 1, 2, 4)...
+                    2025-09-03 05:32:44,861 - INFO - Requesting API page 1 for Asura Style
+                    2025-09-03 05:32:49,890 - ERROR - Network error fetch https://civitai.com/api/v1/images?modelId=87577&nsfw=X (final): 
+                    2025-09-03 05:32:49,890 - WARNING - Stopping pagination for Asura Style: Failed to fetch API page 1 (check logs for specific URL error).
+                    2025-09-03 05:32:49,892 - INFO - Finished gathering non-tag download tasks.
+                    2025-09-03 05:32:49,893 - INFO - Run finalization steps...
+                    2025-09-03 05:32:49,893 - INFO - HTTP Client closed.
+                    2025-09-03 05:32:49,893 - INFO - Database connection closed.
+                    2025-09-03 05:32:49,899 - INFO - Run Stats Aggregated: Success=0, Skipped=0, NoMeta=0, API Items=0
+                    2025-09-03 05:32:49,900 - WARNING - Some identifiers failed processing or completed with errors:
+                    2025-09-03 05:32:49,901 - WARNING - - model:87577: Status=Failed, Reason=Failed to fetch API page 1 (check logs for specific URL error)
+                    2025-09-03 05:32:49,902 - WARNING - Failed to fetch 1 unique API page URLs after retries. Check DEBUG logs for specific URLs.
+                    2025-09-03 05:32:49,902 - INFO - --- Starting Run Finalization ---
+                    2025-09-03 05:32:49,902 - INFO - Total run duration: 25.59 seconds
+                    2025-09-03 05:32:49,902 - INFO - Run finished with errors.
+                    2025-09-03 05:32:49,903 - INFO - Script finished.
+
+                    I'll just leave it here to remember that. The unmodified version of the program - the original one had that problem too, so guess that was server side?
+             '''
+             #/MOD
              page_data = await self._fetch_api_page(url) # Retries handled inside
 
              # --- Add Check for Specific "Not Found" Errors on First Page ---
@@ -1027,7 +1056,31 @@ class CivitaiDownloader:
                         dir_component = self._clean_path_component(model_name, max_length=60) if model_name else f"model_{ident}"
                         target_dir = os.path.join(option_folder, dir_component)
                         url = f"{self.base_url}?modelId={ident}{url_params}"
-                    #/MOD
+                        #Downloads model first - than goes for images <<This order allows Ctrl+C to skip excessive amount of images
+                        helper_filename = "model_downloader.py"
+                        helper_path = os.path.join(self.script_dir, helper_filename)
+                        if os.path.exists(helper_path):
+                            try:
+                                import importlib.util
+                                spec = importlib.util.spec_from_file_location("model_downloader", helper_path)
+                                module = importlib.util.module_from_spec(spec)
+                                spec.loader.exec_module(module)
+
+                                func = getattr(module, "_model_download_all_versions", None)
+                                if callable(func):
+                                    self.logger.info(f"Calling helper _model_download_all_versions for model {ident} -> {target_dir}")
+                                    #GETTING API_KEY FROM FILE api.txt
+                                    with open('api.txt') as f:
+                                        api_key = f.readline()
+                                    await func(ident, download_dir=target_dir, API_TOKEN=api_key)
+                                    self.logger.info(f"Helper finished for model {ident}")
+                                else:
+                                    self.logger.error(f"Function '_model_download_all_versions' not found in {helper_path}")
+                            except Exception as e:
+                                self.logger.error(f"Failed to load/execute helper at {helper_path}: {e}", exc_info=True)
+                        else:
+                            self.logger.warning(f"Helper script not found at {helper_path}; skipping model-version downloads.")
+                     #/MOD
                     
                      elif idt == 'modelVersion': target_dir = os.path.join(option_folder, f"modelVersion_{ident}"); url = f"{self.base_url}?modelVersionId={ident}{url_params}"
                      if target_dir and url: os.makedirs(target_dir, exist_ok=True); tasks.append(self._run_paginated_download(url, target_dir, parent_result_key=result_key))
@@ -1062,7 +1115,6 @@ class CivitaiDownloader:
              final_option_folder = "" # Determine folder for potential CSV summary
              if self.mode and self.mode in option_folder_map: # Check if mode is valid before getting folder
                   final_option_folder = os.path.join(self.output_dir, option_folder_map[self.mode])
-
              # Close HTTP client if open
              if self._client and not self._client.is_closed:
                  await self._client.aclose(); self.logger.info("HTTP Client closed.")
@@ -1744,7 +1796,6 @@ class CivitaiDownloader:
                      w = csv.writer(f); w.writerow(["Current Tag", "Previously Downloaded Tag", "Checkpoint Name", "Relative Image Path", "Download URL"]); w.writerows(csv_data)
                  self.logger.info(f"Wrote summary CSV: {csv_path}")
              except Exception as e: self.logger.error(f"Failed write CSV for '{tag}': {e}", exc_info=True)
-
 # ===================
 # --- Entry Point ---
 # ===================
@@ -1764,4 +1815,3 @@ if __name__ == "__main__":
         print(f"\n--- UNHANDLED CRITICAL ERROR ---\nError: {main_err}\nCheck log: {log_file_path}\n----------------------")
     logger.info("Script finished.")
     print("\nDownload process complete.")
-    

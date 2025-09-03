@@ -8,8 +8,9 @@ Every block of code added/modded is in bewtween:
 So moded blocks of code can be easly found in the source.
 
 ## What Is moddified?
+- Now model (or if  more tha  one present - all of them) is downloaded first + you should put your API KEY into the `api.txt` file if you want to be able to download every resource possible, since some are locked and you will be unable to download them without providing auth in request. Since models are downloaded first, if they have excessive amount of images in the gallery you can skip them by just Ctrl+C the program.
 - The folder name while downloading by model ID is now the model name from pulled from civitai
-- With `--no_sort` option  the program creates separate folder for `.txt` files, keeping them all in ther, while images stay in main directory (named after model name).
+- With `--no_sort` option  the program creates separate folder for `.txt` files, keeping them all in there, while images stay in main directory (named after model name).
 
 It downloads all the images from a provided Username, Model ID or Model TAG from CivitAI. 
 Should the API not spit out all the data for all images then I'm sorry. 

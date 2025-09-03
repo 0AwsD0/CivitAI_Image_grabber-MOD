@@ -12,6 +12,9 @@ So moded blocks of code can be easly found in the source.
 - The folder name while downloading by model ID is now the model name from pulled from civitai
 - With `--no_sort` option  the program creates separate folder for `.txt` files, keeping them all in there, while images stay in main directory (named after model name).
 
+### Default command
+ `python civit_image_downloader.py --timeout 5 --quality 2 --redownload 1 --mode 2 --no_sort --model_id ID_HERE`
+
 It downloads all the images from a provided Username, Model ID or Model TAG from CivitAI. 
 Should the API not spit out all the data for all images then I'm sorry. 
 The script can only download where data is provided.

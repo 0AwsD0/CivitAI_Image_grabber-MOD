@@ -22,6 +22,7 @@ The script can only download where data is provided.
 The images are Downloaded into a folder with the name of the user, ModelID or the TAG <br /> 
 Second Level is the Model Name with which the image was generated.
 
+Sometimes you have to execute script couple of times to get API response to download images. Wait few second and try until it works.
 
 
 # Installation

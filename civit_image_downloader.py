@@ -12,7 +12,7 @@ import re
 from datetime import datetime
 import logging
 import csv
-import sqlite3 
+import sqlite3
 from asyncio import Lock, Semaphore
 import argparse
 from typing import Optional, Tuple, List, Dict, Any, AsyncGenerator
@@ -46,14 +46,14 @@ except ImportError:
 BASE_API_URL: str = "https://civitai.com/api/v1/images"
 MODELS_API_URL: str = "https://civitai.com/api/v1/models"
 DEFAULT_HEADERS: Dict[str, str] = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0", 
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0",
     "Content-Type": "application/json"
 }
 DEFAULT_SEMAPHORE_LIMIT: int = 5
 DEFAULT_OUTPUT_DIR: str = "image_downloads"
 DATABASE_FILENAME: str = "tracking_database.sqlite" # <--- SQLite DB filename
 LOG_FILENAME_TEMPLATE: str = "civit_image_downloader_log_{version}.txt"
-SCRIPT_VERSION: str = "1.3-sqlite" 
+SCRIPT_VERSION: str = "1.3-sqlite"
 DEFAULT_TIMEOUT: int = 60
 DEFAULT_RETRIES: int = 2
 DEFAULT_MAX_PATH_LENGTH: int = 240
@@ -156,7 +156,7 @@ class CivitaiDownloader:
         self.script_dir: str = os.path.dirname(os.path.abspath(__file__))
         self.db_path: str = os.path.join(self.script_dir, DATABASE_FILENAME)
         self.db_conn: Optional[sqlite3.Connection] = None
-        self._init_db() 
+        self._init_db()
 
         # --- API and Resources ---
         self.base_url: str = BASE_API_URL
@@ -285,10 +285,10 @@ class CivitaiDownloader:
                 if inp == '2': return 'HD'
                 if inp == '1' or inp == '': return 'SD'
                 print("Invalid choice.")
-        else: return 'SD' 
+        else: return 'SD'
 
     def _get_redownload_option(self) -> int:
-        if self.args.redownload == 1: return 1 
+        if self.args.redownload == 1: return 1
         elif self._is_interactive_mode():
             self.logger.debug("Prompting user for redownload option...")
             while True:
@@ -306,7 +306,7 @@ class CivitaiDownloader:
                 inp = input("Choose mode (1=user, 2=model ID, 3=tag search, 4=model version ID): ").strip()
                 if inp in ['1', '2', '3', '4']: return inp
                 print("Invalid choice.")
-        else: 
+        else:
             self.logger.error("Operation mode (--mode) is required in non-interactive mode.")
             print("Error: Operation mode (--mode) is required.")
             return None
@@ -478,7 +478,7 @@ class CivitaiDownloader:
 
                     # Final Checks
                     if total_size != 0 and downloaded_size < total_size:
-                         try: os.remove(final_image_path); 
+                         try: os.remove(final_image_path);
                          except OSError: pass
                          return False, None, "Incomplete download"
                     self.logger.debug(f"Successfully downloaded: {final_image_path}")
@@ -519,7 +519,7 @@ class CivitaiDownloader:
                           os.remove(partial_file_path_to_check)
                      except OSError:
                           pass
-                      
+
     async def _write_meta_data(self, meta: Optional[Dict[str, Any]], base_output_path_no_ext: str, image_id: str, username: Optional[str]) -> Tuple[bool, Optional[str]]:
         """Writes metadata to a .txt file."""
         username = username or 'unknown_user'; meta = meta or {}
@@ -555,7 +555,7 @@ class CivitaiDownloader:
              self.logger.error(f"Error writing metadata to {output_path_final}: {e}", exc_info=True); return False, None
 
     # --- API Fetching Method ---
-    @retry( 
+    @retry(
         stop=stop_after_attempt(1 + parse_arguments().retries),
         wait=wait_random_exponential(multiplier=1, max=10),
         retry=retry_if_exception(should_retry_exception),
@@ -614,29 +614,29 @@ class CivitaiDownloader:
             self.logger.error(f"API fetch failed after retries {url}: {e}")
             self.failed_urls.append(url)
             return None
-        
+
         except httpx.RequestError as e:
             self.logger.error(f"Network error fetch {url} (final): {e}")
             self.failed_urls.append(url)
             return None
-        
+
         except httpx.HTTPStatusError as e: # Catches final 5xx or non-retryable HTTP errors raised above
             self.logger.error(f"HTTP error fetch {url} (final): Status {e.response.status_code}")
             self.failed_urls.append(url)
             return None
-        
+
         except Exception as e:
             self.logger.critical(f"Unexpected error fetch {url}: {e}", exc_info=True)
             self.failed_urls.append(url)
             return None
-        
+
     # --- Mode Execution Logic ---
     async def _process_api_items(self, items: List[Dict[str, Any]], target_dir: str, mode_specific_info: Optional[Dict] = None, parent_result_key: Optional[str] = None, model_id: Optional[int] = None) -> None:
         """Processes image items: checks skip conditions, creates download tasks."""
         tasks = []; mode_specific_info = mode_specific_info or {}
         tag_to_check = mode_specific_info.get('tag_to_check'); disable_prompt_check = mode_specific_info.get('disable_prompt_check', False); current_tag = mode_specific_info.get('current_tag')
         for item in items:
-            image_id = item.get('id'); 
+            image_id = item.get('id');
             if not image_id: continue
             should_skip, skip_reason = False, None
             result_entry = self._get_result_entry(parent_result_key, model_id)
@@ -661,7 +661,7 @@ class CivitaiDownloader:
 
     async def _handle_single_download(self, item: Dict[str, Any], target_dir: str, current_tag: Optional[str] = None, parent_result_key: Optional[str] = None, model_id: Optional[int] = None) -> None:
         """Handles download, meta write, tracking, stats update for one item."""
-        image_id = item.get('id'); 
+        image_id = item.get('id');
         if not image_id: return
         base_path_no_ext = os.path.join(target_dir, self._clean_path_component(str(image_id)))
         result_entry = self._get_result_entry(parent_result_key, model_id)
@@ -701,7 +701,7 @@ class CivitaiDownloader:
                     2025-09-03 05:32:44,860 - INFO - Helper finished for model 87577
                     2025-09-03 05:32:44,861 - INFO - Executing 1 download tasks (Modes 1, 2, 4)...
                     2025-09-03 05:32:44,861 - INFO - Requesting API page 1 for Asura Style
-                    2025-09-03 05:32:49,890 - ERROR - Network error fetch https://civitai.com/api/v1/images?modelId=87577&nsfw=X (final): 
+                    2025-09-03 05:32:49,890 - ERROR - Network error fetch https://civitai.com/api/v1/images?modelId=87577&nsfw=X (final):
                     2025-09-03 05:32:49,890 - WARNING - Stopping pagination for Asura Style: Failed to fetch API page 1 (check logs for specific URL error).
                     2025-09-03 05:32:49,892 - INFO - Finished gathering non-tag download tasks.
                     2025-09-03 05:32:49,893 - INFO - Run finalization steps...
@@ -819,7 +819,7 @@ class CivitaiDownloader:
 
         while url:
              page_count += 1
-             
+
              if page_count >= MAX_SEARCH_PAGES:
                  # Improved logging and console message
                  limit_msg = f"Tag search for '{tag_query}' reached maximum page limit ({MAX_SEARCH_PAGES})."
@@ -853,7 +853,7 @@ class CivitaiDownloader:
                                    if tag_query.lower() in model_tags: tag_found_in_results = True; break
                               if not tag_found_in_results:
                                    msg = f"Tag '{tag_query}' not found in model tags on page 1. Aborting search (likely invalid tag)."
-                                   self.logger.warning(msg); 
+                                   self.logger.warning(msg);
                                    return [] # Abort
                               else: self.logger.debug(f"Tag '{tag_query}' validated via first page."); first_page_validated = True
                          # --- End First Page Validation ---
@@ -868,7 +868,7 @@ class CivitaiDownloader:
 
                      # Pagination
                      url = metadata.get('nextPage')
-                     if url: await asyncio.sleep(1); 
+                     if url: await asyncio.sleep(1);
                      else: break
                  else: # Fetch helper failed
                      self.logger.warning(f"Stopping model search pagination for '{tag_query}' due to fetch failure page {page_count}."); url = None; break
@@ -985,7 +985,7 @@ class CivitaiDownloader:
                          if not found_models:
                              self.logger.warning(f"No models found or processed for tag '{tag}'.")
                              # Update status if not already set (e.g., by validation failure in _search..)
-                             if self.run_results[result_key]['status'] == 'Pending':                                 
+                             if self.run_results[result_key]['status'] == 'Pending':
                                  self.run_results[result_key]['status'] = 'Completed (No Models Found or Invalid Tag)' # <-- Use this string
                              continue # Skip to the next tag in the list
 
@@ -1045,7 +1045,7 @@ class CivitaiDownloader:
                           overall_success = False # Mark run as having errors
                  # --- End Tag Processing Loop ---
                  self.logger.info(f"--- Finished Tag Search Mode ---")
-            
+
 
             else: # Modes 1, 2, 4 (Username, ModelID, ModelVersionID)
                 for idt, ident in identifiers_to_process:
@@ -1056,10 +1056,36 @@ class CivitaiDownloader:
 
                      #MOD
                      elif idt == 'model':
+
                         #resolve model name for folder name
                         model_name = await self._get_model_name_by_id(ident)
+
+                        #Block below exists coz model names can contain "|" and other 'illegal' characters
+                        #remove whitespace and . (dot) that Windows cuts anyway
+                        model_name = model_name.strip().rstrip(".")
+                        #replace things listed below
+                        model_name = model_name.strip().lstrip("\\/")
+                        #forbidden characters for Windows
+                        bad_chars = '<>:"/\\|?*'
+                        for ch in bad_chars:
+                            model_name = model_name.replace(ch, "_")
+                        #print("=====================================")
+                        #print("IMAGE DOWNLOADER -> MODEL NAME: ", model_name)
+                        #print("=====================================")
+
                         dir_component = self._clean_path_component(model_name, max_length=60) if model_name else f"model_{ident}"
                         target_dir = os.path.join(option_folder, dir_component)
+                        #print("=====================================")
+                        #print("IMAGE DOWNLOADER -> TRAEGET DIR: "+repr(str(target_dir))+"TEST")
+                        #print("=====================================")
+                        '''
+                        if target_dir:
+                            last_char = target_dir[-1]
+                            print("Last char:", repr(last_char))
+                            print("Unicode codepoint:", ord(last_char))
+                            print("Hex:", hex(ord(last_char)))
+                            print("Hex:", hex(ord(last_char)))
+                        '''
                         url = f"{self.base_url}?modelId={ident}{url_params}"
                         #Downloads model first - than goes for images <<This order allows Ctrl+C to skip excessive amount of images
                         helper_filename = "model_downloader.py"
@@ -1086,7 +1112,7 @@ class CivitaiDownloader:
                         else:
                             self.logger.warning(f"Helper script not found at {helper_path}; skipping model-version downloads.")
                      #/MOD
-                    
+
                      elif idt == 'modelVersion': target_dir = os.path.join(option_folder, f"modelVersion_{ident}"); url = f"{self.base_url}?modelVersionId={ident}{url_params}"
                      if target_dir and url: os.makedirs(target_dir, exist_ok=True); tasks.append(self._run_paginated_download(url, target_dir, parent_result_key=result_key))
                      else: self.run_results[result_key].update({'status':'Failed', 'reason':'Internal setup error'})
@@ -1307,51 +1333,50 @@ class CivitaiDownloader:
         try: os.makedirs(option_dir, exist_ok=True); self.logger.debug(f"Ensured folder: {option_dir}"); return option_dir
         except OSError as e: self.logger.error(f"Failed create folder '{option_dir}': {e}"); return self.output_dir
 
-        
-    def _clean_path_component(self, path_part: str, max_length: Optional[int] = None) -> str:
-        """Cleans/shortens a filename or directory name component using simple replacement."""
-        self.logger.debug(f"Cleaning path component (max: {max_length}): INPUT='{path_part}'")
-        if max_length is None: max_length = self.max_path_length
 
-        # Define the set of characters considered invalid
+    def _clean_path_component(self, path_part: str, max_length: Optional[int] = None) -> str:
+        """Cleans/shortens a filename or directory name component safely for Windows."""
+
+        self.logger.debug(f"Cleaning path component (max: {max_length}): INPUT={repr(path_part)}")
+        if max_length is None:
+            max_length = self.max_path_length
+
+        # Define invalid characters (Windows forbidden + control chars + tabs/newlines)
         invalid_char_set = set('<>:"/\\|?*\t\n\r') | {chr(i) for i in range(32)}
 
         # Step 1: Decode common URL encodings first
-        cleaned = path_part.replace("%20", " ").replace("%2B", "+").replace("%26", "&")
+        cleaned = (
+            path_part.replace("%20", " ")
+                    .replace("%2B", "+")
+                    .replace("%26", "&")
+        )
 
-        # Step 2: Replace invalid characters with underscore using a loop
-        cleaned_list = []
-        for char in cleaned:
-            if char in invalid_char_set:
-                cleaned_list.append('_')
-            else:
-                cleaned_list.append(char)
-        cleaned = "".join(cleaned_list)
-        self.logger.debug(f"After invalid char replace loop: '{cleaned}'")
+        # Step 2: Replace invalid characters with underscore
+        cleaned = "".join('_' if c in invalid_char_set else c for c in cleaned)
+        self.logger.debug(f"After invalid char replace: {repr(cleaned)}")
 
         # Step 3: Strip leading/trailing problematic chars and consolidate underscores
-        cleaned = cleaned.strip('. _') # Strip spaces, dots, and underscores from ends
-        cleaned = re.sub(r'_+', '_', cleaned) # Consolidate underscores
-        self.logger.debug(f"After strip/consolidate: '{cleaned}'")
+        cleaned = cleaned.strip("._ ")  # remove spaces, dots, underscores from both ends
+        cleaned = re.sub(r"_+", "_", cleaned)  # collapse multiple underscores
+        self.logger.debug(f"After strip/consolidate: {repr(cleaned)}")
 
         # Step 4: Shorten if necessary
-        original_len = len(cleaned)
-        if original_len > max_length:
-             self.logger.debug(f"Shortening component (len {original_len} > max {max_length})")
-             base, dot, ext = cleaned.rpartition('.')
-             if dot and len(ext) < 10: # Simple check for a likely extension
-                  allowed_base_len = max_length - len(dot) - len(ext)
-                  allowed_base_len = max(1, allowed_base_len)
-                  new_base = base[:allowed_base_len].strip('_')
-                  cleaned = new_base + dot + ext
-                  self.logger.debug(f"Shortened preserving extension: '{cleaned}' (Base: '{new_base}', Ext: '{ext}')")
-             else: # No extension or very long one, just truncate
-                  cleaned = cleaned[:max_length].strip('_')
-                  self.logger.debug(f"Shortened via simple truncate: '{cleaned}'")
+        if len(cleaned) > max_length:
+            self.logger.debug(f"Shortening component (len {len(cleaned)} > max {max_length})")
+            base, dot, ext = cleaned.rpartition(".")
+            if dot and len(ext) < 10:  # keep extensions intact if short
+                allowed_base_len = max(1, max_length - len(dot) - len(ext))
+                new_base = base[:allowed_base_len].rstrip("._ ")
+                cleaned = new_base + dot + ext
+                self.logger.debug(f"Shortened preserving extension: {repr(cleaned)}")
+            else:
+                cleaned = cleaned[:max_length].rstrip("._ ")
+                self.logger.debug(f"Shortened via truncate: {repr(cleaned)}")
 
-        # Step 5: Ensure result is not empty
-        final_cleaned = cleaned if cleaned else "_"
-        self.logger.debug(f"Cleaning result: OUTPUT='{final_cleaned}'")
+        # Step 5: Final cleanup (guarantee no trailing/leading junk)
+        final_cleaned = cleaned.strip("._ ") if cleaned else "_"
+        self.logger.debug(f"Cleaning result: OUTPUT={repr(final_cleaned)}")
+
         return final_cleaned
 
     def _safe_move(self, src: str, dst: str, max_retries: int = 5, delay: float = 0.5) -> bool:
@@ -1450,7 +1475,7 @@ class CivitaiDownloader:
         self.logger.error(f"safe_move loop finished unexpectedly for '{src_basename}'. Final status uncertain.")
         return move_succeeded_flag # Return status based on checks inside loop
 
-        
+
     def _print_download_statistics(self) -> None:
         """Prints the final download statistics summary, including per-identifier results and warnings."""
         print("\n--- Download Statistics Summary ---")
@@ -1466,7 +1491,7 @@ class CivitaiDownloader:
         no_models_processed_identifiers = []
         no_process_statuses = {
             'Completed (No Models Found)',
-            'Completed (No Models Found or Invalid Tag)', 
+            'Completed (No Models Found or Invalid Tag)',
             'Completed (No Items Found)',
             'Failed (Validation)',
             'Failed (Not Found)'
@@ -1547,7 +1572,7 @@ class CivitaiDownloader:
 
         # --- Stage 4: Print Summary Warning for Unprocessed Identifiers ---
         self.logger.debug(f"Final list of no-process identifiers: {no_models_processed_identifiers}")
-        if no_models_processed_identifiers:  
+        if no_models_processed_identifiers:
              print("\nNOTE: The following identifiers resulted in zero models/images being processed:")
              self.logger.debug("NOTE: The following identifiers resulted in zero models/images being processed:")
              for key in sorted(no_models_processed_identifiers):
@@ -1555,7 +1580,7 @@ class CivitaiDownloader:
                   reason = self.run_results[key].get('reason')
                   reason_str = f" (Reason: {reason})" if reason else ""
                   msg = f"- {key} (Status: {status}{reason_str})"
-                  print(msg) 
+                  print(msg)
                   self.logger.debug(msg) # Log detail as warning too
         # --- End Summary Warning ---
 
@@ -1578,7 +1603,7 @@ class CivitaiDownloader:
             if argval is not None and not is_default and argn not in relevant_args: unused_args.append(f"--{argn.replace('_', '-')}")
         if unused_args: msg = f"Warning: Arguments potentially unused in mode {mode}: {', '.join(unused_args)}"; self.logger.warning(msg); print(msg)
 
-     
+
     # ============================
     # --- Sorting Logic ---
     # ============================
@@ -1714,7 +1739,7 @@ class CivitaiDownloader:
                  self.logger.error(f"Unexpected error during sort processing for {meta_file}: {e}", exc_info=True)
                  # Continue to the next meta file
 
-        
+
         # =====================
         # --- Orphan Check ---
         # =====================
@@ -1760,7 +1785,7 @@ class CivitaiDownloader:
 
         self.logger.info(f"Finished sort process in: {base_dir}")
 
-    
+
     # ============================
     # --- Tag Summary CSV ---
     # ============================

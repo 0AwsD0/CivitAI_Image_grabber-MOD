@@ -16,6 +16,28 @@ import sqlite3
 from asyncio import Lock, Semaphore
 import argparse
 from typing import Optional, Tuple, List, Dict, Any, AsyncGenerator
+#MOD
+import json
+
+def _load_checkpoint(self, checkpoint_path: str) -> int:
+    """Load last successfully downloaded page from checkpoint file."""
+    if os.path.exists(checkpoint_path):
+        try:
+            with open(checkpoint_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return int(data.get('last_page', 0))
+        except Exception as e:
+            self.logger.warning(f"Failed to read checkpoint {checkpoint_path}: {e}")
+    return 0  # No checkpoint, start from page 1
+
+def _save_checkpoint(self, checkpoint_path: str, page_number: int):
+    """Save the last successfully downloaded page."""
+    try:
+        with open(checkpoint_path, 'w', encoding='utf-8') as f:
+            json.dump({'last_page': page_number}, f)
+    except Exception as e:
+        self.logger.error(f"Failed to save checkpoint {checkpoint_path}: {e}")
+#/MOD
 
 # Color Code
 RED = "\033[91m"
@@ -683,6 +705,22 @@ class CivitaiDownloader:
     async def _run_paginated_download(self, initial_url: str, target_dir: str, mode_specific_info: Optional[Dict] = None, parent_result_key: Optional[str] = None, model_id: Optional[int] = None) -> None:
         """Handles pagination and processing for an identifier, checking for 'Not Found' errors."""
         url: Optional[str] = initial_url; page_count: int = 0; identifier_status: str = 'Pending'
+        #MOD ----- CHECKPOINT LOAD -----
+        checkpoint_file = os.path.join(target_dir, "last_page.json")
+
+        if os.path.exists(checkpoint_file):
+            try:
+                with open(checkpoint_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    saved = data.get("nextPage")
+                    if saved:
+                        self.logger.warning(f"Resuming from saved checkpoint: {saved}")
+                        url = saved
+            except Exception as e:
+                self.logger.error(f"Failed to load checkpoint: {e}")
+        #/MOD ---------------------------
+        
+        identifier_status: str = 'Pending'
         identifier_reason: Optional[str] = None; identifier_api_items: int = 0
         result_entry = self._get_result_entry(parent_result_key, model_id)
         if not result_entry: self.logger.error(f"Result entry missing for {parent_result_key}/{model_id}"); return
@@ -761,13 +799,27 @@ class CivitaiDownloader:
                       self.logger.warning(f"No items found for {os.path.basename(target_dir)} (User/Model/Version may have no images).")
                       # Also print this info to console for clarity
                       print(f"Info for '{parent_result_key}': Identifier found, but no images associated with it.")
-
+                
+                #MOD ----- CHECKPOINT SAVE -----
+                 try:
+                     with open(checkpoint_file, "w", encoding="utf-8") as f:
+                         json.dump({"nextPage": url}, f)
+                 except Exception as e:
+                     self.logger.error(f"Failed to save checkpoint: {e}")
+                #/MOD ----------------------------
 
                  url = metadata.get('nextPage')
                  if not url: # No more pages
                       if identifier_status != 'Failed (Not Found)': # Avoid overwriting specific failure
                          if identifier_status == 'Processing': identifier_status = 'Completed'
                          elif identifier_status == 'Pending': identifier_status = 'Completed (No Items Found)'
+                    #MOD ----- CHECKPOINT CLEAR -----
+                      if os.path.exists(checkpoint_file):
+                        try:
+                            os.remove(checkpoint_file)
+                        except Exception:
+                            pass
+                    #/MOD -----------------------------
                       self.logger.debug(f"No next page found for {os.path.basename(target_dir)}."); break
                  else: await asyncio.sleep(1)
              else: # Fetch failed or returned 404 etc.
@@ -1548,7 +1600,14 @@ class CivitaiDownloader:
         if self.skipped_reasons_summary:
             print("\nReasons for skipping/failing items across run:")
             sorted_reasons = sorted(self.skipped_reasons_summary.items(), key=lambda item: item[1], reverse=True)
-            for reason, count in sorted_reasons: print(f"- {reason}: {count} times")
+            #MOD
+            for reason, count in self.skipped_reasons_summary.items():
+                # if error type "400"
+                if "400" in reason or "Too Many Requests" in reason:
+                    print(f"{RED}- {reason}: {count} times{RESET}")
+                else:
+                    print(f"- {reason}: {count} times")
+            #/MOD
 
         # --- Stage 3: Print Per-Identifier Breakdown (using calculated counts) ---
         print("\n--- Results per Identifier ---")

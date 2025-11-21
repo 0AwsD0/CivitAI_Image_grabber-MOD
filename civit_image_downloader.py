@@ -438,75 +438,121 @@ class CivitaiDownloader:
         retry=retry_if_exception(should_retry_exception),
         before_sleep=before_sleep_log(retry_logger, logging.WARNING)
     )
-    async def download_image(self, image_api_item: Dict[str, Any], base_output_path: str) -> Tuple[bool, Optional[str], Optional[str]]:
-        """Downloads a single image, detects extension, saves, with retries."""
+
+    async def download_image(self,image_api_item: Dict[str, Any],base_output_path: str,retry_count: int = 0) -> Tuple[bool, Optional[str], Optional[str]]:
+        """Downloads a single image, detects extension, saves, with retries (handles 429)."""
+        MAX_RETRIES = 5
+
         image_url = image_api_item.get('url')
         image_id = image_api_item.get('id')
-        # Basic validation
-        if not image_url or not image_id: return False, None, "Missing URL or ID in API data"
-        if not base_output_path or not os.path.isdir(base_output_path): return False, None, f"Invalid target directory '{base_output_path}'"
 
-        # Prepare URL and path
+        # Basic validation
+        if not image_url or not image_id:
+            return False, None, "Missing URL or ID in API data"
+        if not base_output_path or not os.path.isdir(base_output_path):
+            return False, None, f"Invalid target directory '{base_output_path}'"
+
+        # Prepare URL
         target_url = image_url
         if self.quality == 'HD':
-             target_url = re.sub(r"width=\d{3,4}", "original=true", image_url)
-             if target_url == image_url: target_url += ('&' if '?' in target_url else '?') + "original=true"
-             self.logger.debug(f"HD URL: {target_url}")
+            target_url = re.sub(r"width=\d{3,4}", "original=true", image_url)
+            if target_url == image_url:
+                target_url += ('&' if '?' in target_url else '?') + "original=true"
+            self.logger.debug(f"HD URL: {target_url}")
+
         final_image_path = None
 
         try:
             async with self.semaphore:
                 client = await self._get_client()
                 async with client.stream("GET", target_url) as response:
-                    if 400 <= response.status_code < 500: return False, None, f"HTTP Client Error {response.status_code} {response.reason_phrase}" # Not retryable
-                    response.raise_for_status() # Raises for >=400. Retry logic catches 5xx.
+
+                    # Retry 429
+                    if response.status_code == 429:
+                        if retry_count >= MAX_RETRIES:
+                            self.logger.warning(f"Exceeded max retries for {image_id}, skipping...")
+                            return False, None, "429 Rate limit exceeded"
+                        retry_after = int(response.headers.get("Retry-After", 5))
+                        retry_after = max(retry_after, 3)
+                        self.logger.warning(
+                        f"429 Rate limit for {image_id}, retrying in {retry_after}s (attempt {retry_count + 1}/{MAX_RETRIES})"
+                        )
+                        await asyncio.sleep(retry_after)
+                        return await self.download_image(image_api_item, base_output_path, retry_count + 1)
+
+                    # Other 4xx errors are non-retryable
+                    elif 400 <= response.status_code < 500:
+                        return False, None, f"HTTP Client Error {response.status_code} {response.reason_phrase}"
+
+                    response.raise_for_status()  # handle 5xx
 
                     # Extension Detection
                     total_size = int(response.headers.get('content-length', 0))
                     content_type = response.headers.get("Content-Type", "").split(";")[0].strip().lower()
-                    mapping = { "image/png": ".png", "image/jpeg": ".jpeg", "image/jpg": ".jpeg", "image/webp": ".webp", "video/mp4": ".mp4", "video/webm": ".webm" }
+                    mapping = {
+                        "image/png": ".png",
+                        "image/jpeg": ".jpeg",
+                        "image/jpg": ".jpeg",
+                        "image/webp": ".webp",
+                        "video/mp4": ".mp4",
+                        "video/webm": ".webm"
+                    }
                     file_extension = mapping.get(content_type)
                     byte_iter = response.aiter_bytes()
                     first_chunk = await anext(byte_iter, None)
-                    if first_chunk is None: return False, None, "Downloaded empty file"
-                    if file_extension is None: file_extension = detect_extension(first_chunk)
-                    if file_extension is None: file_extension = ".png" if self.quality == 'HD' else ".jpeg"
+                    if first_chunk is None:
+                        return False, None, "Downloaded empty file"
+                    if file_extension is None:
+                        file_extension = detect_extension(first_chunk)
+                    if file_extension is None:
+                        file_extension = ".png" if self.quality == 'HD' else ".jpeg"
 
                     # Path Construction
                     filename_base = self._clean_path_component(str(image_id))
                     potential_final_path = os.path.join(base_output_path, filename_base + file_extension)
                     if len(potential_final_path) > self.max_path_length:
                         allowed_len = self.max_path_length - len(base_output_path) - 1
-                        if allowed_len < 10: return False, None, "Path too long, cannot shorten"
+                        if allowed_len < 10:
+                            return False, None, "Path too long, cannot shorten"
                         shortened_filename = self._clean_path_component(filename_base + file_extension, max_length=allowed_len)
                         final_image_path = os.path.join(base_output_path, shortened_filename)
-                    else: final_image_path = potential_final_path
+                    else:
+                        final_image_path = potential_final_path
                     final_dir = os.path.dirname(final_image_path)
-                    if not final_dir: return False, None, "Invalid final path structure"
+                    if not final_dir:
+                        return False, None, "Invalid final path structure"
 
                     # File Writing
-                    progress_bar = tqdm(total=total_size, unit='B', unit_scale=True, desc=f"DL {os.path.basename(final_image_path)}", leave=False, dynamic_ncols=True)
+                    progress_bar = tqdm(
+                        total=total_size, unit='B', unit_scale=True,
+                        desc=f"DL {os.path.basename(final_image_path)}", leave=False, dynamic_ncols=True
+                    )
                     downloaded_size = 0
                     try:
                         os.makedirs(final_dir, exist_ok=True)
                         async with aiofiles.open(final_image_path, "wb") as file:
-                             if first_chunk:
-                                 await file.write(first_chunk)
-                                 progress_bar.update(len(first_chunk)); downloaded_size += len(first_chunk)
-                             async for chunk in byte_iter:
-                                 await file.write(chunk)
-                                 progress_bar.update(len(chunk)); downloaded_size += len(chunk)
-                    finally: progress_bar.close()
+                            if first_chunk:
+                                await file.write(first_chunk)
+                                progress_bar.update(len(first_chunk))
+                                downloaded_size += len(first_chunk)
+                            async for chunk in byte_iter:
+                                await file.write(chunk)
+                                progress_bar.update(len(chunk))
+                                downloaded_size += len(chunk)
+                    finally:
+                        progress_bar.close()
 
                     # Final Checks
                     if total_size != 0 and downloaded_size < total_size:
-                         try: os.remove(final_image_path);
-                         except OSError: pass
-                         return False, None, "Incomplete download"
+                        try:
+                            os.remove(final_image_path)
+                        except OSError:
+                            pass
+                        return False, None, "Incomplete download"
+
                     self.logger.debug(f"Successfully downloaded: {final_image_path}")
                     return True, final_image_path, None
 
-        # Exception Handling (Final/Non-Retryable)
         except RetryError as e:
             reason = f"Max retries exceeded: {e}"
             self.logger.error(f"Download failed for {target_url} after retries: {e}")
@@ -530,17 +576,17 @@ class CivitaiDownloader:
         except Exception as e:
             reason = f"Unexpected error: {e.__class__.__name__}"
             self.logger.critical(f"Unexpected error DL {target_url}: {e}", exc_info=True)
-
             return False, None, reason
 
         finally:
             if final_image_path and not os.path.exists(final_image_path):
                 partial_file_path_to_check = final_image_path + ".partial"
                 if os.path.exists(partial_file_path_to_check):
-                     try:
-                          os.remove(partial_file_path_to_check)
-                     except OSError:
-                          pass
+                    try:
+                        os.remove(partial_file_path_to_check)
+                    except OSError:
+                        pass
+
 
     async def _write_meta_data(self, meta: Optional[Dict[str, Any]], base_output_path_no_ext: str, image_id: str, username: Optional[str]) -> Tuple[bool, Optional[str]]:
         """Writes metadata to a .txt file."""
@@ -719,115 +765,104 @@ class CivitaiDownloader:
             except Exception as e:
                 self.logger.error(f"Failed to load checkpoint: {e}")
         #/MOD ---------------------------
-        
+
         identifier_status: str = 'Pending'
         identifier_reason: Optional[str] = None; identifier_api_items: int = 0
         result_entry = self._get_result_entry(parent_result_key, model_id)
         if not result_entry: self.logger.error(f"Result entry missing for {parent_result_key}/{model_id}"); return
 
+        #MOD
         while url:
-             page_count += 1
-             self.logger.info(f"Requesting API page {page_count} for {os.path.basename(target_dir)}")
-             #MOD
-             self.logger.info(f"URL: {url}")
-             '''   /\ ABOVE LINE WAS FOR DEBUG:
-                   || For some tests -> program got the models but images failed to be fetched ~failed on page 1 /after 5 minutes API started acting correctly
+            page_count += 1
+            self.logger.info(f"Requesting API page {page_count} for {os.path.basename(target_dir)}")
+            self.logger.info(f"URL: {url}")
 
-                   More on that here (from logs):
-                    2025-09-03 05:32:24,311 - INFO - Starting Civitai Downloader run (Version 1.3-sqlite)...
-                    2025-09-03 05:32:24,919 - INFO - Calling helper _model_download_all_versions for model 87577 -> MY_PATH\image_downloads\Model_ID_Search\Asura Style
-                    2025-09-03 05:32:44,860 - INFO - Helper finished for model 87577
-                    2025-09-03 05:32:44,861 - INFO - Executing 1 download tasks (Modes 1, 2, 4)...
-                    2025-09-03 05:32:44,861 - INFO - Requesting API page 1 for Asura Style
-                    2025-09-03 05:32:49,890 - ERROR - Network error fetch https://civitai.com/api/v1/images?modelId=87577&nsfw=X (final):
-                    2025-09-03 05:32:49,890 - WARNING - Stopping pagination for Asura Style: Failed to fetch API page 1 (check logs for specific URL error).
-                    2025-09-03 05:32:49,892 - INFO - Finished gathering non-tag download tasks.
-                    2025-09-03 05:32:49,893 - INFO - Run finalization steps...
-                    2025-09-03 05:32:49,893 - INFO - HTTP Client closed.
-                    2025-09-03 05:32:49,893 - INFO - Database connection closed.
-                    2025-09-03 05:32:49,899 - INFO - Run Stats Aggregated: Success=0, Skipped=0, NoMeta=0, API Items=0
-                    2025-09-03 05:32:49,900 - WARNING - Some identifiers failed processing or completed with errors:
-                    2025-09-03 05:32:49,901 - WARNING - - model:87577: Status=Failed, Reason=Failed to fetch API page 1 (check logs for specific URL error)
-                    2025-09-03 05:32:49,902 - WARNING - Failed to fetch 1 unique API page URLs after retries. Check DEBUG logs for specific URLs.
-                    2025-09-03 05:32:49,902 - INFO - --- Starting Run Finalization ---
-                    2025-09-03 05:32:49,902 - INFO - Total run duration: 25.59 seconds
-                    2025-09-03 05:32:49,902 - INFO - Run finished with errors.
-                    2025-09-03 05:32:49,903 - INFO - Script finished.
+            page_data = await self._fetch_api_page(url)  # retries handled inside
 
-                    I'll just leave it here to remember that. The unmodified version of the program - the original one had that problem too, so guess that was server side?
-             '''
-             #/MOD
-             page_data = await self._fetch_api_page(url) # Retries handled inside
+            # --- Handle 429 here if needed (optional, depends on your fetch) ---
 
-             # --- Add Check for Specific "Not Found" Errors on First Page ---
-             if page_count == 1 and page_data and isinstance(page_data, dict):
-                 error_msg = page_data.get('error', '').lower()
-                 message_msg = page_data.get('message', '').lower()
-                 not_found = False
-                 if 'user not found' in error_msg:
-                      identifier_reason = "User not found (API Error)"
-                      not_found = True
-                 elif 'model not found' in error_msg or 'model not found' in message_msg:
-                      identifier_reason = "Model not found (API Error)"
-                      not_found = True
-                 elif 'version not found' in error_msg or 'version not found' in message_msg:
-                       identifier_reason = "Model Version not found (API Error)"
-                       not_found = True
+            if page_count == 1 and page_data and isinstance(page_data, dict):
+                # Check for "Not Found" errors
+                error_msg = page_data.get('error', '').lower()
+                message_msg = page_data.get('message', '').lower()
+                not_found = False
+                if 'user not found' in error_msg:
+                    identifier_reason = "User not found (API Error)"
+                    not_found = True
+                elif 'model not found' in error_msg or 'model not found' in message_msg:
+                    identifier_reason = "Model not found (API Error)"
+                    not_found = True
+                elif 'version not found' in error_msg or 'version not found' in message_msg:
+                    identifier_reason = "Model Version not found (API Error)"
+                    not_found = True
 
-                 if not_found:
-                      self.logger.warning(f"Identifier not found for {parent_result_key}: {identifier_reason}")
-                      identifier_status = 'Failed (Not Found)'
-                      # Update result entry immediately and stop processing this identifier
-                      result_entry['status'] = identifier_status
-                      result_entry['reason'] = identifier_reason
-                      # Print specific message to console
-                      print(f"Error for '{parent_result_key}': {identifier_reason}. Please check the identifier.")
-                      return # Stop processing this identifier completely
-             # --- End "Not Found" Check ---
+                if not_found:
+                    self.logger.warning(f"Identifier not found for {parent_result_key}: {identifier_reason}")
+                    identifier_status = 'Failed (Not Found)'
+                    result_entry['status'] = identifier_status
+                    result_entry['reason'] = identifier_reason
+                    print(f"Error for '{parent_result_key}': {identifier_reason}. Please check the identifier.")
+                    return
 
-             if page_data is not None: # Process page if fetch succeeded and wasn't a "Not Found" error handled above
-                 items = page_data.get('items', [])
-                 metadata = page_data.get('metadata', {})
-                 item_count = len(items); identifier_api_items += item_count
-                 self.logger.info(f"Processing {item_count} items from page {page_count}")
+            if page_data is not None:
+                items = page_data.get('items', [])
+                metadata = page_data.get('metadata', {})
+                item_count = len(items)
+                identifier_api_items += item_count
+                self.logger.info(f"Processing {item_count} items from page {page_count}")
 
-                 if items:
-                      if identifier_status == 'Pending': identifier_status = 'Processing'
-                      await self._process_api_items(items, target_dir, mode_specific_info, parent_result_key, model_id)
-                 elif page_count == 1: # No items on the first page (and not a "Not Found" error)
-                      identifier_status = 'Completed (No Items Found)'
-                      self.logger.warning(f"No items found for {os.path.basename(target_dir)} (User/Model/Version may have no images).")
-                      # Also print this info to console for clarity
-                      print(f"Info for '{parent_result_key}': Identifier found, but no images associated with it.")
-                
-                #MOD ----- CHECKPOINT SAVE -----
-                 try:
-                     with open(checkpoint_file, "w", encoding="utf-8") as f:
-                         json.dump({"nextPage": url}, f)
-                 except Exception as e:
-                     self.logger.error(f"Failed to save checkpoint: {e}")
-                #/MOD ----------------------------
+                if items:
+                    if identifier_status == 'Pending':
+                        identifier_status = 'Processing'
+                    await self._process_api_items(items, target_dir, mode_specific_info, parent_result_key, model_id)
 
-                 url = metadata.get('nextPage')
-                 if not url: # No more pages
-                      if identifier_status != 'Failed (Not Found)': # Avoid overwriting specific failure
-                         if identifier_status == 'Processing': identifier_status = 'Completed'
-                         elif identifier_status == 'Pending': identifier_status = 'Completed (No Items Found)'
-                    #MOD ----- CHECKPOINT CLEAR -----
-                      if os.path.exists(checkpoint_file):
+                elif page_count == 1:
+                    identifier_status = 'Completed (No Items Found)'
+                    self.logger.warning(f"No items found for {os.path.basename(target_dir)}")
+                    print(f"Info for '{parent_result_key}': Identifier found, but no images associated with it.")
+
+                # --- SAVE CHECKPOINT AFTER SUCCESSFUL PROCESSING ---
+                next_page = metadata.get('nextPage')
+                if next_page:
+                    try:
+                        with open(checkpoint_file, "w", encoding="utf-8") as f:
+                            json.dump({"nextPage": next_page}, f)
+                    except Exception as e:
+                        self.logger.error(f"Failed to save checkpoint: {e}")
+
+                # --- MOVE TO NEXT PAGE OR FINISH ---
+                if not next_page:
+                    if identifier_status != 'Failed (Not Found)':
+                        if identifier_status == 'Processing':
+                            identifier_status = 'Completed'
+                        elif identifier_status == 'Pending':
+                            identifier_status = 'Completed (No Items Found)'
+                    # Delete checkpoint as run is done
+                    if os.path.exists(checkpoint_file):
                         try:
                             os.remove(checkpoint_file)
                         except Exception:
                             pass
-                    #/MOD -----------------------------
-                      self.logger.debug(f"No next page found for {os.path.basename(target_dir)}."); break
-                 else: await asyncio.sleep(1)
-             else: # Fetch failed or returned 404 etc.
-                 fetch_fail_reason = f"Failed to fetch API page {page_count}"
-                 if url in self.failed_urls: fetch_fail_reason += " (check logs for specific URL error)"
-                 if page_count == 1: identifier_status = 'Failed'; identifier_reason = fetch_fail_reason
-                 else: identifier_status = 'Completed (Fetch Error on Subsequent Page)'; identifier_reason = fetch_fail_reason
-                 self.logger.warning(f"Stopping pagination for {os.path.basename(target_dir)}: {fetch_fail_reason}."); break
+                    self.logger.debug(f"No next page found for {os.path.basename(target_dir)}.")
+                    break
+                else:
+                    url = next_page
+                    await asyncio.sleep(1)
+
+            else:
+                # Failed fetch or 404 etc.
+                fetch_fail_reason = f"Failed to fetch API page {page_count}"
+                if url in self.failed_urls:
+                    fetch_fail_reason += " (check logs for specific URL error)"
+                if page_count == 1:
+                    identifier_status = 'Failed'
+                    identifier_reason = fetch_fail_reason
+                else:
+                    identifier_status = 'Completed (Fetch Error on Subsequent Page)'
+                    identifier_reason = fetch_fail_reason
+                self.logger.warning(f"Stopping pagination for {os.path.basename(target_dir)}: {fetch_fail_reason}.")
+                break
+        #/MOD
 
         # Update final status (unless already set to Failed Not Found)
         if result_entry and identifier_status != 'Failed (Not Found)':
@@ -1596,10 +1631,19 @@ class CivitaiDownloader:
         print(f"Total images without metadata: {total_no_meta}")
         print(f"Total skipped/failed items: {total_skipped}")
 
+        #MOD
+
         # Print aggregated skip/fail reasons
         if self.skipped_reasons_summary:
             print("\nReasons for skipping/failing items across run:")
             sorted_reasons = sorted(self.skipped_reasons_summary.items(), key=lambda item: item[1], reverse=True)
+            for reason, count in sorted_reasons:
+                if "400" in reason or "Too Many Requests" in reason:
+                    print(f"{RED}- {reason}: {count} times{RESET}")
+                else:
+                    print(f"- {reason}: {count} times")
+            '''
+            #Code below works if you want to skip other reasons. To do so Comment the lines containing FOR loop above to the point, where 'sorted_reasons' will be dimmed in IDE - it's not used. And than uncomment this section below.
             #MOD
             for reason, count in self.skipped_reasons_summary.items():
                 # if error type "400"
@@ -1608,7 +1652,8 @@ class CivitaiDownloader:
                 else:
                     print(f"- {reason}: {count} times")
             #/MOD
-
+            '''
+            #/MOD
         # --- Stage 3: Print Per-Identifier Breakdown (using calculated counts) ---
         print("\n--- Results per Identifier ---")
         sorted_keys = sorted(self.run_results.keys())

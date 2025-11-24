@@ -37,6 +37,7 @@ def _save_checkpoint(self, checkpoint_path: str, page_number: int):
             json.dump({'last_page': page_number}, f)
     except Exception as e:
         self.logger.error(f"Failed to save checkpoint {checkpoint_path}: {e}")
+
 #/MOD
 
 # Color Code
@@ -156,6 +157,20 @@ def detect_extension(data: bytes) -> Optional[str]:
 # ============================
 class CivitaiDownloader:
     """Handles downloading images and metadata from Civitai using SQLite tracking."""
+
+    #MOD FOR DEBUG
+    async def _fetch_raw_model_info(self, model_id: str):
+        client = await self._get_client()
+        url = f"https://civitai.com/api/v1/models/{model_id}"
+        try:
+            resp = await client.get(url)
+            self.logger.warning(f"[DEBUG] Model API status for {model_id}: {resp.status_code}")
+            if resp.status_code != 200:
+                return {"error": f"status {resp.status_code}"}
+            return resp.json()
+        except Exception as e:
+            return {"error": str(e)}
+    #/MOD
 
     def __init__(self, args: argparse.Namespace):
         """Initializes the downloader with configuration and database connection."""
@@ -1146,6 +1161,17 @@ class CivitaiDownloader:
 
                         #resolve model name for folder name
                         model_name = await self._get_model_name_by_id(ident)
+                        #self.logger.warning(f"RAW MODEL INFO for ID {ident}: {json.dumps(raw_info, indent=2)}")
+                        #Below line Debug: raw API resp.
+                        raw_info = await self._fetch_raw_model_info(ident)
+                        self.logger.warning(f"[DEBUG] Raw model API response for {ident}:\n{json.dumps(raw_info, indent=2)}")
+                        #Below if statement is for this:
+                        #line 1152, in run model_name = model_name.strip().rstrip(".") AttributeError: 'NoneType' object has no attribute 'strip' //sometimes API returns some other response
+                        if not model_name or not isinstance(model_name, str):
+                            self.logger.warning(f"API returned no model name for ID {ident}. Raw value: {repr(model_name)}")
+                            model_name = f"model_{ident}"
+                        else:
+                            model_name = model_name.strip().rstrip(".")
 
                         #Block below exists coz model names can contain "|" and other 'illegal' characters
                         #remove whitespace and . (dot) that Windows cuts anyway
@@ -1401,16 +1427,37 @@ class CivitaiDownloader:
         """Fetch model name from Civitai API, given a model ID."""
         try:
             client = await self._get_client()
-            resp = await client.get(f"{MODELS_API_URL}/{model_id}")
-            if resp.status_code == 200:
+            url = f"{MODELS_API_URL}/{model_id}"
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                self.logger.warning(f"[NameFetch] Non-200 response for model {model_id}: {resp.status_code}")
+                return None
+            try:
                 data = resp.json()
-                name = data.get("name")
-                if name:
-                    return name
+            except Exception as e:
+                self.logger.error(f"[NameFetch] Failed to decode JSON for model {model_id}: {e}")
+                return None
+            #API structure check
+            name = data.get("name") or data.get("modelName")
+
+            #Fallback if possible
+            if not name:
+                versions = data.get("modelVersions", [])
+                if versions and isinstance(versions, list):
+                    fallback_name = versions[0].get("name")
+                    if fallback_name:
+                        self.logger.warning(
+                            f"[NameFetch] Using fallback version name for model {model_id}: {fallback_name}"
+                        )
+                        name = fallback_name
+
+            if name:
+                return name
             self.logger.warning(f"Could not resolve model name for ID {model_id}; using fallback.")
+            return None
         except Exception as e:
             self.logger.error(f"Error fetching model name for ID {model_id}: {e}", exc_info=True)
-        return None
+            return None
     #/MOD
 
     # --- Utility and Reporting Methods ---

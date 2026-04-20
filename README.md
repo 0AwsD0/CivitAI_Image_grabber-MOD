@@ -11,6 +11,8 @@ So moded blocks of code can be easly found in the source.
 - Now model (or if  more tha  one present - all of them) is downloaded first + you should put your API KEY into the `api.txt` file if you want to be able to download every resource possible, since some are locked and you will be unable to download them without providing auth in request. Since models are downloaded first, if they have excessive amount of images in the gallery you can skip them by just Ctrl+C the program.
 - The folder name while downloading by model ID is now the model name from pulled from civitai
 - With `--no_sort` option  the program creates separate folder for `.txt` files, keeping them all in there, while images stay in main directory (named after model name).
+- 
+CMD script by default uses new 'no_txt' argument - it prevents creation of `/txt` folder and txt files in it. It's not needed while the gen data is in exif anyway.
 
 ### Default command
  `python civit_image_downloader.py --timeout 5 --quality 2 --redownload 1 --mode 2 --no_sort --model_id ID_HERE`

@@ -138,6 +138,9 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--no_sort", action='store_true', help="Disable sorting images into model subfolders.")
     parser.add_argument("--max_path", type=int, default=DEFAULT_MAX_PATH_LENGTH, help="Approximate max length for file paths.")
     parser.add_argument("--retries", type=int, default=DEFAULT_RETRIES, help="Number of retries for failures.")
+    #MOD
+    parser.add_argument("--no_txt", action='store_true', help="Disable creating txt metadata files.")
+    #/MOD
     return parser.parse_args()
 
 # ==========================
@@ -605,6 +608,10 @@ class CivitaiDownloader:
 
     async def _write_meta_data(self, meta: Optional[Dict[str, Any]], base_output_path_no_ext: str, image_id: str, username: Optional[str]) -> Tuple[bool, Optional[str]]:
         """Writes metadata to a .txt file."""
+        #MOD
+        if self.args.no_txt:
+            return False, None
+        #/MOD
         username = username or 'unknown_user'; meta = meta or {}
         content_lines = []; meta_filename_suffix = ""
         if not meta or all(str(v).strip() == '' for v in meta.values()):
@@ -1162,9 +1169,11 @@ class CivitaiDownloader:
                         #resolve model name for folder name
                         model_name = await self._get_model_name_by_id(ident)
                         #self.logger.warning(f"RAW MODEL INFO for ID {ident}: {json.dumps(raw_info, indent=2)}")
-                        #Below line Debug: raw API resp.
-                        raw_info = await self._fetch_raw_model_info(ident)
-                        self.logger.warning(f"[DEBUG] Raw model API response for {ident}:\n{json.dumps(raw_info, indent=2)}")
+                        
+                        #Below lines Debug: raw API resp.
+                        #Uncomment this to see API Response: raw_info = await self._fetch_raw_model_info(ident)
+                        #Uncomment this to see API Response: self.logger.warning(f"[DEBUG] Raw model API response for {ident}:\n{json.dumps(raw_info, indent=2)}")
+                        
                         #Below if statement is for this:
                         #line 1152, in run model_name = model_name.strip().rstrip(".") AttributeError: 'NoneType' object has no attribute 'strip' //sometimes API returns some other response
                         if not model_name or not isinstance(model_name, str):
@@ -1186,7 +1195,7 @@ class CivitaiDownloader:
                         #print("IMAGE DOWNLOADER -> MODEL NAME: ", model_name)
                         #print("=====================================")
 
-                        dir_component = self._clean_path_component(model_name, max_length=60) if model_name else f"model_{ident}"
+                        dir_component = self._clean_path_component(model_name, max_length=80) if model_name else f"model_{ident}" #HERE YOU DEFINE HOW LONG FOLDER NAME CAN BE //remember about considering MAX PATH in your OS + images.ext + /txt/xxx.txt
                         target_dir = os.path.join(option_folder, dir_component)
                         #print("=====================================")
                         #print("IMAGE DOWNLOADER -> TRAEGET DIR: "+repr(str(target_dir))+"TEST")

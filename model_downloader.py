@@ -92,7 +92,7 @@ async def _model_download_all_versions(
                 if not file.get("primary", False):
                     continue
 
-                file_url = f"{file['downloadUrl']}?token={API_TOKEN}"
+                file_url = f"{file['downloadUrl']}&token={API_TOKEN}"
                 file_name = sanitize_filename(file.get("name", "unnamed_file"))
                 save_path = os.path.join(download_dir, file_name)
 
